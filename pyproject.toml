@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localsharefile"
+version = "0.2.0"
+description = "LocalShareFile —— 局域网文件共享工具：多目录共享、网页远程配置、FTP 式批量下载、拖拽上传、开机自启动"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "LocalShareFile" }]
+keywords = ["lan", "share", "file", "server", "http"]
+
+[project.scripts]
+localsharefile = "localsharefile.cli:main"
+
+[tool.setuptools]
+packages = ["localsharefile"]
