@@ -66,10 +66,12 @@ def _merge_config(cfg: dict, args) -> dict:
 
 def _check_port(cfg: dict) -> bool:
     """端口被其他进程占用时给出提示，返回是否可用。"""
+    port = cfg.get("port")
+    port = 8000 if port is None else int(port)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind((cfg.get("host") or "0.0.0.0", int(cfg.get("port") or 8000)))
+            s.bind((cfg.get("host") or "0.0.0.0", port))
             return True
         except OSError:
             return False

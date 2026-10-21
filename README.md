@@ -1,10 +1,13 @@
 # LocalShareFile
 
 局域网文件共享工具 —— 在一台电脑上安装后，局域网内任何设备（手机 / 平板 / 电脑）用浏览器
-打开 `http://IP:端口` 即可**浏览、下载、上传**文件。纯 Python 标准库实现，**零第三方依赖**。
+打开 `http://IP:端口` 即可**浏览、下载、上传**文件；另提供 **`lsf` 终端命令**，
+可在命令行直接列目录 / 下载 / 上传。纯 Python 标准库实现，**零第三方依赖**。
 
 ## 功能特性
 
+- 🖥️ **终端 CLI（`lsf`）**：命令行直接列目录、下载（断点续传、目录自动打包 ZIP）、
+  批量上传，带实时进度与速度显示
 - 📁 **多目录共享**：同时共享任意多个目录，随时在网页上添加 / 移除
 - 🌐 **网页远程配置**：首页即可添加共享目录，支持「浏览服务器磁盘」可视化选择目录，
   无需登录服务器改配置文件
@@ -21,12 +24,15 @@
 ## 安装
 
 ```bash
-# 构建安装包（在项目根目录）
-./build.sh              # 产物在 dist/localsharefile-0.2.0-py3-none-any.whl
+# 从 PyPI 安装（任意机器，Python ≥ 3.8）
+pip install localsharefile
 
-# 在目标机器安装（任意 Linux / Windows / macOS，Python ≥ 3.8）
-pip install localsharefile-0.2.0-py3-none-any.whl
+# 从源码构建 wheel 安装包
+./build.sh              # 产物在 dist/ 下
+pip install dist/localsharefile-*.whl
 ```
+
+安装后会得到两个命令：`localsharefile`（服务端）与 `lsf`（客户端）。
 
 ## 快速使用
 
@@ -52,6 +58,41 @@ localsharefile run -d ~/share --port 8080
    在弹窗里逐级点开服务器磁盘，选定后一键共享
 3. 进入目录后像 FTP 一样操作：点文件名下载、勾选多个条目点
    **⬇ 下载选中** 打包 ZIP、拖文件到页面或某个文件夹行上传
+
+## 终端 CLI：lsf
+
+在另一台机器（或本机）安装后，可直接在终端访问服务器：
+
+```bash
+# 列出服务器上的共享目录
+lsf ls http://192.168.1.10:8000/
+
+# 列出目录内容（名称/大小/时间/类型）
+lsf ls http://192.168.1.10:8000/s/电影/
+
+# 下载文件（实时进度+速度；-c 断点续传；-o 指定保存路径）
+lsf get http://192.168.1.10:8000/s/电影/a.mp4
+lsf get -c -o /tmp/续传.mp4 http://192.168.1.10:8000/s/电影/a.mp4
+
+# 下载整个目录（服务端打包 ZIP，URL 以 / 结尾）
+lsf get http://192.168.1.10:8000/s/电影/喜剧/
+
+# 上传文件到该目录（可一次多个）
+lsf put http://192.168.1.10:8000/s/电影/ 本地文件1.mp4 本地文件2.mkv
+
+# 服务器启用口令时，任意子命令追加 --token 你的口令
+lsf ls --token s3cret http://192.168.1.10:8000/
+lsf get --token s3cret http://192.168.1.10:8000/s/电影/a.mp4
+```
+
+服务器脚本化示例（无需浏览器）：
+
+```bash
+SERVER=http://192.168.1.10:8000
+lsf ls $SERVER/ | grep -v '^ ' | tail -n +2          # 共享名列表
+lsf get "$SERVER/s/软件/ubuntu-24.04.iso"              # 下载 ISO
+curl -sL "https://pypi.org/pypi/localsharefile/json"   # 查询最新版本
+```
 
 ## 配置开机自启动
 
@@ -103,7 +144,7 @@ localsharefile uninstall                               # 卸载自启动
 ## 开发与测试
 
 ```bash
-python3 -m unittest discover -s tests    # 运行 18 个单元 / 集成测试
+python3 -m unittest discover -s tests    # 运行 20 个单元 / 集成测试
 ./build.sh                               # 构建 wheel
 ```
 
@@ -112,8 +153,9 @@ python3 -m unittest discover -s tests    # 运行 18 个单元 / 集成测试
 ```
 localsharefile/
 ├── __init__.py      # 版本信息
-├── cli.py           # 命令行入口（run/install/uninstall/status）
-├── server.py        # HTTP 服务（多目录路由/管理 API/多选打包/上传）
+├── cli.py           # 服务端命令行入口（run/install/uninstall/status）
+├── client.py        # 终端客户端 lsf（ls/get/put，进度/续传/token）
+├── server.py        # HTTP 服务（多目录路由/管理 API/多选打包/上传/ls API）
 ├── page.py          # 内置网页模板（首页/浏览页/目录选择器，离线可用）
 ├── config.py        # 多目录配置读写 + v0.1 配置迁移
 ├── state.py         # 访问统计：历史目录 / 常用排序（state.json）

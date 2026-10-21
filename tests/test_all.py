@@ -164,6 +164,10 @@ class TestHTTPIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # 管理 API 会写真实配置文件，重定向 HOME 隔离测试环境
+        cls._old_home = os.environ.get("HOME")
+        cls._test_home = tempfile.mkdtemp(prefix="lsf_test_home_")
+        os.environ["HOME"] = cls._test_home
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name)
         (root / "movies").mkdir()
@@ -185,6 +189,12 @@ class TestHTTPIntegration(unittest.TestCase):
         cls.srv.shutdown()
         cls.srv.server_close()
         cls.tmp.cleanup()
+        import shutil
+        shutil.rmtree(cls._test_home, ignore_errors=True)   # 清理隔离 HOME
+        if cls._old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = cls._old_home
 
     def test_home_lists_all_shares(self):
         status, _h, body = _request(self.port, "GET", "/")
@@ -311,6 +321,60 @@ class TestHTTPIntegration(unittest.TestCase):
         status, _h, body = _request(self.port, "GET", "/api/browse?path=/no/such/dir")
         self.assertEqual(status, 400)
         self.assertIn("error", json.loads(body))
+
+    def test_api_ls_for_cli_client(self):
+        from localsharefile import client as lsf_client
+        base = f"http://127.0.0.1:{self.port}"
+        c = lsf_client.Client(base)
+        # 根：列出共享目录
+        shares = c.list_shares()
+        self.assertEqual([s["name"] for s in shares], ["影视", "文档"])
+        # 目录内容
+        data = c.list_dir("/s/影视/")
+        names = [e["name"] for e in data["entries"]]
+        self.assertIn("hello.txt", names)
+        hello = next(e for e in data["entries"] if e["name"] == "hello.txt")
+        self.assertEqual((hello["size"], hello["dir"]), (1000, False))
+        sub = next(e for e in data["entries"] if e["name"] == "子目录")
+        self.assertTrue(sub["dir"])
+        # 隐藏文件默认不列；错误路径抛 ClientError
+        self.assertFalse(any(e["name"].startswith(".") for e in data["entries"]))
+        with self.assertRaises(lsf_client.ClientError):
+            c.list_dir("/s/noshare/")
+        # HTTP 直接访问同样校验
+        status, _h, body = _request(self.port, "GET", "/api/ls?p=/")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(body)["shares"]), 2)
+        status, _h, _b = _request(self.port, "GET", "/api/ls?p=/bad")
+        self.assertEqual(status, 400)
+
+    def test_cli_client_roundtrip(self):
+        """lsf 客户端完整链路：下载文件（含续传）/ 打包下载目录 / 上传。"""
+        from localsharefile import client as lsf_client
+        base = f"http://127.0.0.1:{self.port}"
+        c = lsf_client.Client(base)
+        with tempfile.TemporaryDirectory() as td:
+            # 文件下载
+            out = os.path.join(td, "hello.txt")
+            progress_calls = []
+            c.download_file("/s/影视/hello.txt", out, progress=lambda m, end="": progress_calls.append(m))
+            self.assertEqual(Path(out).read_bytes(), b"0123456789" * 100)
+            # 断点续传：伪造半份文件后续传
+            Path(out).write_bytes(b"0123456789" * 30)          # 300 字节
+            c.download_file("/s/影视/hello.txt", out, resume=True, progress=None)
+            self.assertEqual(Path(out).read_bytes(), b"0123456789" * 100)
+            # 目录打包下载
+            zout = c.download_zip("影视/子目录", os.path.join(td, "sub.zip"))
+            self.assertTrue(zout.endswith(".zip"))
+            with zipfile.ZipFile(zout) as zf:
+                self.assertTrue(any(n.endswith("same.txt") for n in zf.namelist()))
+            # 上传
+            src = os.path.join(td, "cli 上传.bin")
+            Path(src).write_bytes(b"CLI-DATA")
+            saved = c.upload("影视", src)
+            self.assertEqual(saved, "cli 上传.bin")
+            self.assertEqual((Path(self.cfg["directories"][0]["path"]) / "cli 上传.bin")
+                             .read_bytes(), b"CLI-DATA")
 
     def test_traversal_protection(self):
         for p in ["/s/%E5%BD%B1%E8%A7%86/../../etc", "/s/%2e%2e/%2e%2e/etc"]:

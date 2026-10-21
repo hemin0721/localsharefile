@@ -348,9 +348,52 @@ class ShareHandler(BaseHTTPRequestHandler):
                                     "text/html; charset=utf-8")
         if raw_path == "/api/browse":
             return self._api_browse(q.get("path") or str(Path.home()))
+        if raw_path == "/api/ls":
+            return self._api_ls(q.get("p") or "/")
         if raw_path.startswith("/s/"):
             return self._serve_share(raw_path)
         self._error(404, "未找到该页面")
+
+    def _api_ls(self, p: str):
+        """目录列表 JSON（供 lsf 命令行客户端使用）：p=/ 返回共享目录，/s/名/子路径 返回条目。"""
+        p = _fix_latin1(p or "/").strip()
+        if p == "/":
+            return self._json(200, {"shares": [
+                {"name": d["name"], "path": d["path"],
+                 "visits": self.state.count(d["name"])} for d in self.cfg["directories"]]})
+        decoded = unquote(p)
+        if not decoded.startswith("/s/"):
+            return self._json(400, {"error": "路径需以 /s/共享名/ 开头"})
+        rest = decoded[len("/s/"):]
+        name, _, rel = rest.partition("/")
+        if name not in self.shares:
+            return self._json(404, {"error": f"共享目录「{name}」不存在"})
+        try:
+            rel = sanitize_rel_path(rel)
+        except ValueError:
+            return self._json(400, {"error": "非法路径"})
+        target = self.shares[name] / rel if rel else self.shares[name]
+        if not target.is_dir():
+            return self._json(404, {"error": "目录不存在"})
+        show_hidden = self.cfg.get("show_hidden", False)
+        entries = []
+        try:
+            items = list(os.scandir(target))
+        except OSError:
+            items = []
+        for entry in items:
+            if not show_hidden and entry.name.startswith("."):
+                continue
+            try:
+                stat = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            entries.append({"name": entry.name,
+                            "dir": entry.is_dir(follow_symlinks=False),
+                            "size": 0 if entry.is_dir(follow_symlinks=False) else stat.st_size,
+                            "mtime": int(stat.st_mtime)})
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return self._json(200, {"share": name, "path": rel, "entries": entries})
 
     def _serve_share(self, raw_path: str):
         rest = raw_path[len("/s/"):]
@@ -602,7 +645,10 @@ def make_server(cfg: dict, state: ShareState = None) -> ShareServer:
     shares = {d["name"]: Path(d["path"]) for d in cfg.get("directories", [])}
     handler = type("BoundHandler", (ShareHandler,),
                    {"shares": shares, "cfg": cfg, "state": state or ShareState()})
-    return ShareServer((cfg.get("host") or "0.0.0.0", int(cfg.get("port") or 8000)), handler)
+    port = cfg.get("port")
+    port = 8000 if port is None else int(port)   # 0 = 系统随机分配（测试用）
+    host = cfg.get("host") or "0.0.0.0"
+    return ShareServer((host, port), handler)
 
 
 def serve_forever(cfg: dict) -> None:

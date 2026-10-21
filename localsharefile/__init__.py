@@ -4,5 +4,5 @@
 支持配置系统开机自启动（Linux / Windows / macOS）。
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 APP_NAME = "localsharefile"
